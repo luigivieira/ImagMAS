@@ -1,7 +1,7 @@
 ImagMAS (A Multiagent System to Estimate the Coverage of Alluminum Alloy Plates Submitted to Peen Forming Process)
 =======
 
-![Screenshot](luigivieira/ImagMAS/screeshots/screenshot3.png)
+![Screenshot](screeshots/screenshot3.png)
 
 This project was developed during the execution of the master course in Computing Engineering at the Instituto de Pesquisas Tecnológicas do Estado de São Paulo (the dissertation - in portuguese - can be accessed through this link: http://cassiopea.ipt.br/teses/2009_EC_Luiz_Carlos_Vieira.pdf). The code was developed with the Java language, and depends on the JADE platform (Java Agent DEvelopment Framework, available at http://jade.tilab.com/) and the JADEX reasoning system (available at http://jadex-agents.informatik.uni-hamburg.de/xwiki/bin/view/About/Overview).
 
