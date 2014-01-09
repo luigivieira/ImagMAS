@@ -1,0 +1,2 @@
+@echo off
+java -classpath commons-codec\commons-codec-1.3.jar;bcel.jar;crimson.jar;GraphLayout.jar;http.jar;iiop.jar;ImagMAS.jar;jade.jar;jadeTools.jar;jadex_jadeadapter.jar;jadex_rt.jar;jadex_standalone.jar;jadex_tools.jar;janino.jar;jhall.jar;jibx-bind.jar;jibx-extras.jar;jibx-run.jar;nuggets.jar;xmlpull_1_1_4.jar;xpp3.jar jade.Boot -nomtp -name IMAGMAS -container-name Principal manager:jadex.adapter.jade.JadeAgentAdapter(imagmas.agents.ADFs.SegmentationManager default)
