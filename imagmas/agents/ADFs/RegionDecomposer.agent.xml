@@ -1,0 +1,463 @@
+<!--
+/*
+ * Copyright (C) 2009 Luiz Carlos Vieira
+ * http://www.luiz.vieira.nom.br
+ *
+ * This file is part of the ImagMAS (A Multiagent System to Estimate
+ * the Coverage of Alluminum Alloy Plates Submitted to Peen Forming Process).
+ *
+ * ImagMAS is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ImagMAS is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+
+**********************************************************************************************
+RegionDecomposer.agent.xml
+Arquivo de definição JADEX para o agente com o papel de Decompositor de Região.
+	
+Autor: Luiz Carlos Vieira
+Versão: 2.0
+Data: 06 de setembro de 2008
+**********************************************************************************************
+-->
+
+<agent xmlns="http://jadex.sourceforge.net/jadex"
+			 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			 xsi:schemaLocation="http://jadex.sourceforge.net/jadex
+			 http://jadex.sourceforge.net/jadex-0.96.xsd"
+	name="RegionDecomposer"
+	package="imagmas.agents.ADFs">
+
+	<!--
+	**********************************************************************************************
+	Importações
+	**********************************************************************************************
+	-->
+
+	<imports>
+		<import>java.util.logging.*</import>
+		<import>java.util.*</import>
+		<import>jadex.adapter.fipa.*</import>
+		<import>jadex.util.*</import>
+		<import>imagmas.data.*</import>
+		<import>imagmas.plans.*</import>
+		<import>imagmas.agents.*</import>
+		<import>imagmas.agents.sensors.*</import>
+		<import>imagmas.ontology.*</import>
+	</imports>
+
+	<!--
+	**********************************************************************************************
+	Capacidades
+	**********************************************************************************************
+	-->
+
+	<capabilities>
+		<!-- Capacidade da biblioteca JADEX para a manipulação (criação/eliminação) de agentes. -->
+		<capability name="amscap" file="jadex.planlib.AMS" />
+	</capabilities>
+
+	<!--
+	**********************************************************************************************
+	Crenças
+	**********************************************************************************************
+	-->
+
+	<beliefs>
+		<!-- O próprio agente. -->
+		<belief name="myself" class="CRegionDecomposer">
+			<fact>new CRegionDecomposer($agent.getAgentIdentifier())</fact>
+		</belief>
+
+		<!-- O gerente de segmentação. -->
+		<belief name="manager" class="CSegmentationManager" exported="true" />
+
+		<!-- A região de responsabilidade do agente. -->
+		<belief name="region" class="CRegion" exported="true" />
+
+		<!-- O raio mínimo para uma cratera ser considerada válida. -->
+		<belief name="minimum_crater_radius" class="int" exported="true" />
+
+		<!-- O raio máximo para uma cratera ser considerada válida. -->
+		<belief name="maximum_crater_radius" class="int" exported="true" />
+
+		<!-- A distância mínima entre duas marcas de borda. -->
+		<belief name="distance_between_marks" class="int" exported="true" />
+		
+		<!-- O fator de inclusão entre crateras. -->
+		<belief name="inclusion_factor" class="double" exported="true" />
+
+		<!-- O fator de diferenciação entre crateras. -->
+		<belief name="differentiation_factor" class="double" exported="true" />
+
+		<!-- A largura da imagem no ambiente. -->
+		<belief name="image_width" class="int">
+			<fact evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("image_boundary") != null ?
+				(Integer) $beliefbase.myself.getSensor("image_boundary").sense()[0] :
+				0
+			</fact>
+		</belief>
+
+		<!-- Altura da imagem no ambiente -->
+		<belief name="image_height" class="int">
+			<fact evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("image_boundary") != null ?
+				(Integer) $beliefbase.myself.getSensor("image_boundary").sense()[1] :
+				0
+			</fact>
+		</belief>
+
+		<!-- Localidades formadoras da borda da região. -->
+		<beliefset name="edge_locations" class="CLocation">
+			<facts evaluationmode="dynamic">
+				select $pixel.getLocation()
+				from CPixel $pixel in $beliefbase.region.getBoundaryPixelList()
+			</facts>
+		</beliefset>
+		
+		<!-- Lista de marcas de borda. -->
+		<beliefset name="marks" class="CMark" />
+
+		<!-- Lista com os agentes criados. -->
+		<beliefset name="agents_running" class="String" />
+
+		<!-- Lista com os agentes com análises pendentes -->
+		<beliefset name="agents_pending_analysis" class="String" />
+
+		<!-- Lista das crateras válidas informadas pelos agentes. -->
+		<beliefset name="valid_craters" class="CCrater" />
+		
+		<!-- Temporizador de um segundo para contagem de tempo decorrido. -->
+		<belief name="one_second_timer" class="long" updaterate="1000">
+			<fact>System.currentTimeMillis()</fact>
+		</belief>
+		
+		<!-- Tempo (em segundos) passado desde a última notificação de análise recebida. -->
+		<belief name="seconds_since_last_analysis_inform" class="int">
+			<fact>-1</fact>
+		</belief>
+		
+		<!-- Indicação de que a decomposição já está em progresso. -->
+		<belief name="decomposition_in_progress" class="boolean" />
+		
+		<belief name="stop_requested" class="boolean" />
+	</beliefs>
+	
+	<!--
+	**********************************************************************************************
+	Objetivos
+	**********************************************************************************************
+	-->
+
+	<goals>
+		<!--
+		........................................................................
+		Objetivos principais
+		........................................................................
+		-->
+	
+		<!-- Objetivo de preparação inicial da decomposição (criação das marcas de borda e agentes). -->
+		<performgoal name="prepare_decomposition">
+			<dropcondition>
+				$beliefbase.stop_requested
+			</dropcondition>
+			<deliberation>
+				<inhibits ref="conclude_analysis" />
+				<inhibits ref="terminate" />
+			</deliberation>
+		</performgoal>
+		
+		<!-- Objetivo de conclusão da análise, com o encerramento dos agentes e fechamento da solução
+			 da decomposição. -->
+		<performgoal name="conclude_analysis">
+			<creationcondition>
+				$beliefbase.seconds_since_last_analysis_inform != -1 &amp;&amp;
+				$beliefbase.seconds_since_last_analysis_inform &gt;= 2
+			</creationcondition>
+			<dropcondition>
+				$beliefbase.stop_requested
+			</dropcondition>
+		</performgoal>
+		
+		<!-- Objetivo de término da decomposição e informação da solução ao gerente de segmentação. -->
+		<performgoal name="terminate">
+			<creationcondition>
+				($beliefbase.decomposition_in_progress &amp;&amp;
+				$beliefbase.getBeliefSet("agents_pending_analysis").size() == 0) ||
+				$beliefbase.stop_requested
+				<relevantbeliefset ref="agents_pending_analysis" />
+			</creationcondition>
+		</performgoal>
+		
+		<!--
+		........................................................................
+		Sub-objetivos
+		........................................................................
+		-->
+		
+		<!-- Sub-objetivo de criação de agentes na plataforma JADEX. -->
+		<achievegoalref name="ams_create_agent">
+			<concrete ref="amscap.ams_create_agent" />
+		</achievegoalref>
+	
+		<!-- Sub-objetivo de destruição de agentes na plataforma JADEX. -->		
+		<achievegoalref name="ams_destroy_agent">
+			<concrete ref="amscap.ams_destroy_agent" />
+		</achievegoalref>
+	</goals>
+
+	<!--
+	**********************************************************************************************
+	Planos
+	**********************************************************************************************
+	-->
+
+	<plans>
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de preparação da decomposição
+		........................................................................
+		-->
+	
+		<!-- Plano para criação das marcas de borda. -->
+		<plan name="create_marks">
+			<body class="CCreateMarksPlan" />
+			<trigger>
+				<goal ref="prepare_decomposition" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para criação dos agentes marcadores de centro. -->
+		<plan name="create_center_markers">
+			<body class="CCreateCenterMarkersPlan" />
+			<trigger>
+				<goal ref="prepare_decomposition" />
+			</trigger>
+		</plan>
+
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de conclusão da análise
+		........................................................................
+		-->
+	
+		<plan name="inform_analysis_conclusion">
+			<body class="CInformAnalysisConclusionPlan" />
+			<trigger>
+				<goal ref="conclude_analysis" />
+			</trigger>
+		</plan>
+		
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de encerramento
+		........................................................................
+		-->
+		
+		<plan name="conclude_to_minimum_circle">
+			<body class="CConcludeToMinimumCirclePlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+			<precondition>
+				$beliefbase.getBeliefSet("valid_craters").size() == 0 &amp;&amp;
+				!$beliefbase.stop_requested
+				<relevantbeliefset ref="valid_craters" />
+			</precondition>
+		</plan>
+
+		
+		<!-- Plano para remoção das marcas utilizadas na decomposição. -->
+		<plan name="clean_up_marks">
+			<body class="CCleanUpMarksPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para ajuste da região à solução encontrada. -->
+		<plan name="adjust_region_to_solution">
+			<body class="CAdjustRegionToSolutionPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+			<precondition>
+				!$beliefbase.stop_requested
+			</precondition>
+		</plan>
+		
+		<plan name="inform_decomposition_conclusion">
+			<body class="CInformDecompositionConclusionPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+			<precondition>
+				!$beliefbase.stop_requested
+			</precondition>
+		</plan>
+		
+		<!-- Plano para encerramento do agente. -->
+		<plan name="end_myself">
+			<body class="CEndMyselfPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+		</plan>
+
+		<!--
+		........................................................................
+		Planos de aplicação geral (sem dependência de objetivos)
+		........................................................................
+		-->
+
+		<!-- Plano para reiniciar a contagem de tempo quando um agente iniciar a análise ou 
+		     quando uma análise for recebida de um agente. -->
+		<plan name="reset_analysis_time_counting">
+			<body class="CResetAnalysisTimeCountingPlan" />
+			<trigger>
+				<messageevent ref="start_information_message" />
+				<beliefsetchange ref="agents_pending_analysis" />
+			</trigger>
+			<precondition>
+				$beliefbase.decomposition_in_progress
+			</precondition>
+		</plan>
+
+		<!-- Plano para incrementar a contagem de tempo enquanto análises não são recebidas. -->
+		<plan name="increment_analysis_time_counting">
+			<body class="CIncrementAnalysisTimeCountingPlan" />
+			<trigger>
+				<beliefchange ref="one_second_timer" />
+			</trigger>
+			<precondition>
+				$beliefbase.seconds_since_last_analysis_inform != -1
+			</precondition>
+		</plan>
+		
+		<!-- Plano para tratamento das notificações de análise de cratera. -->
+		<plan name="handle_analysis_information">
+			<body class="CHandleAnalysisInformationPlan" />
+			<trigger>
+				<messageevent ref="crater_analysis_message" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para tratamento das notificações de análise de cratera. -->
+		<plan name="handle_stop_request">
+			<body class="CHandleStopRequestPlan" />
+			<trigger>
+				<messageevent ref="stop_message" />
+			</trigger>
+		</plan>
+	</plans>
+
+	<!--
+	**********************************************************************************************
+	Eventos
+	**********************************************************************************************
+	-->
+	
+	<events>
+		<!-- Mensagem para informação de inicio, recebida pelo agente. -->
+		<messageevent name="start_information_message" type="fipa" direction="receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CStartInformation.class</value>
+			</parameter>
+		</messageevent>
+	
+		<!-- Mensagem para informação da análise da cratera, recebida pelo agente. -->
+		<messageevent name="crater_analysis_message" type="fipa" direction="receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CCraterAnalysisInformation.class</value>
+			</parameter>
+		</messageevent>
+
+		<!-- Mensagem para informação da conclusão da análise e da decomposição, enviada pelo agente. -->
+		<messageevent name="conclusion_message" type="fipa" direction="send">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CConclusionInformation.class</value>
+			</parameter>
+		</messageevent>
+		
+		<!-- Mensagem para requisição da parada da segmentação, recebida pelo agente. -->
+		<messageevent name="stop_message" type="fipa" direction="receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.REQUEST</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CStopRequest.class</value>
+			</parameter>
+		</messageevent>
+	</events>
+
+	<!--
+	**********************************************************************************************
+	Propriedades
+	**********************************************************************************************
+	-->
+	
+	<properties>
+		<property name="logging.level">Level.OFF</property>
+		<property name="logging.useParentHandlers">true</property>
+	</properties>
+	
+	<!--
+	**********************************************************************************************
+	Configurações
+	**********************************************************************************************
+	-->
+	
+	<configurations>
+		<configuration name="default">
+			<goals>
+				<!-- Ativa ao iniciar o objetivo de preparação da decomposição. -->
+				<initialgoal ref="prepare_decomposition" />
+			</goals>
+		</configuration>
+	</configurations>	
+	
+</agent>

@@ -1,0 +1,344 @@
+<!--
+/*
+ * Copyright (C) 2009 Luiz Carlos Vieira
+ * http://www.luiz.vieira.nom.br
+ *
+ * This file is part of the ImagMAS (A Multiagent System to Estimate
+ * the Coverage of Alluminum Alloy Plates Submitted to Peen Forming Process).
+ *
+ * ImagMAS is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ImagMAS is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+**********************************************************************************************
+SegmentationManager.agent.xml
+Arquivo de definição JADEX para o agente com o papel de Gerente de Segmentação.
+	
+Autor: Luiz Carlos Vieira
+Versão: 2.0
+Data: 06 de setembro de 2008
+**********************************************************************************************
+-->
+
+<agent xmlns="http://jadex.sourceforge.net/jadex"
+			 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			 xsi:schemaLocation="http://jadex.sourceforge.net/jadex
+			 http://jadex.sourceforge.net/jadex-0.96.xsd"
+	name="SegmentationManager"
+	package="imagmas.agents.ADFs">
+
+	<!--
+	**********************************************************************************************
+	Importações
+	**********************************************************************************************
+	-->
+
+	<imports>
+		<import>java.util.logging.*</import>
+		<import>jadex.adapter.fipa.*</import>
+		<import>imagmas.gui.*</import>
+		<import>imagmas.agents.*</import>
+		<import>imagmas.agents.sensors.*</import>
+		<import>imagmas.data.*</import>
+		<import>imagmas.plans.*</import>
+		<import>imagmas.ontology.*</import>
+	</imports>
+
+	<!--
+	**********************************************************************************************
+	Capacidades
+	**********************************************************************************************
+	-->
+
+	<capabilities>
+		<!-- Capacidade da biblioteca JADEX para a manipulação (criação/eliminação) de agentes. -->
+		<capability name="amscap" file="jadex.planlib.AMS" />
+	</capabilities>
+
+	<!--
+	**********************************************************************************************
+	Crenças
+	**********************************************************************************************
+	-->
+
+	<beliefs>
+		<!-- Janela principal de interface com o usuário. -->
+		<belief name="main_window" class="CMainWindow">
+			<fact>new CMainWindow($agent.getExternalAccess())</fact>
+		</belief>
+	
+		<!-- O próprio agente. -->
+		<belief name="myself" class="CSegmentationManager">
+			<fact>new CSegmentationManager($agent.getAgentIdentifier())</fact>		
+		</belief>
+		
+		<!-- O raio mínimo para uma cratera ser considerada válida. -->
+		<belief name="minimum_crater_radius" class="int" exported="true" />
+
+		<!-- O raio máximo para uma cratera ser considerada válida. -->
+		<belief name="maximum_crater_radius" class="int" exported="true" />
+
+		<!-- A distância mínima entre duas marcas de borda. -->
+		<belief name="distance_between_marks" class="int" exported="true" />
+		
+		<!-- O fator de inclusão entre crateras. -->
+		<belief name="inclusion_factor" class="double" exported="true" />
+		
+		<!-- O fator de diferenciação entre crateras. -->
+		<belief name="differentiation_factor" class="double" exported="true" />
+		
+		<!-- A largura da imagem no ambiente. -->
+		<belief name="image_width" class="int">
+			<fact evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("image_boundary") != null ?
+				(Integer) $beliefbase.myself.getSensor("image_boundary").sense()[0] :
+				0
+			</fact>
+		</belief>
+
+		<!-- Altura da imagem no ambiente -->
+		<belief name="image_height" class="int">
+			<fact evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("image_boundary") != null ?
+				(Integer) $beliefbase.myself.getSensor("image_boundary").sense()[1] :
+				0
+			</fact>
+		</belief>
+		
+		<!-- Inicio da segmentação foi solicitado pelo usuário. -->
+		<belief name="start_requested" class="boolean" exported="true">
+			<fact>false</fact>
+		</belief>
+		
+		<!-- Parada da segmentação foi solicitada pelo usuário. -->
+		<belief name="stop_requested" class="boolean" exported="true" />
+		
+		<!-- Encerramento da aplicação foi solicitado. -->
+		<belief name="shutdown_requested" class="boolean" exported="true" />
+
+		<!-- Regiões existentes no ambiente. -->
+		<beliefset name="existing_regions" class="CRegion">
+			<facts evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("region") != null ?
+				(CRegion[]) $beliefbase.myself.getSensor("region").sense() :
+				new CRegion[0]
+			</facts>
+		</beliefset>
+		
+		<!-- A região que está em processamento. -->
+		<belief name="region_in_process" class="CRegion" />
+		
+		<beliefset name="regions_processed" class="CRegion" />
+		
+		<!-- O agente decompositor que está em execução. -->
+		<belief name="decomposer_running" class="String" />
+		
+		<!-- A segmentação foi concluida. -->
+		<belief name="segmentation_concluded" class="boolean" />
+
+		<!-- A hora de início da segmentação, descrito em milisegundos. -->
+		<belief name="segmentation_start_time" class="long" />
+	</beliefs>
+	
+	<!--
+	**********************************************************************************************
+	Objetivos
+	**********************************************************************************************
+	-->
+	
+	<goals>
+		<!--
+		........................................................................
+		Objetivos principais
+		........................................................................
+		-->
+		
+		<!-- Objetivo para processamento de cada uma das regiões existentes. -->
+		<performgoal name="process_region">
+			<parameter name="$region" class="CRegion">
+				<bindingoptions>$beliefbase.existing_regions</bindingoptions>
+			</parameter>
+			<unique />
+			<creationcondition>
+				$beliefbase.start_requested
+			</creationcondition>
+			<contextcondition>
+				$beliefbase.region_in_process == null ||
+				$beliefbase.region_in_process.equals($goal.$region)
+			</contextcondition>
+			<dropcondition>
+				$beliefbase.stop_requested
+			</dropcondition>
+			<deliberation cardinality="1">
+				<inhibits ref="process_region">
+					$goal.$region.getID() &lt; $ref.$region.getID()
+				</inhibits>
+			</deliberation>
+		</performgoal>
+		
+		<!-- Objetivo para conclusão da segmentação. -->
+		<performgoal name="conclude_segmentation">
+			<creationcondition>
+				$beliefbase.segmentation_concluded
+			</creationcondition>
+		</performgoal>
+		
+		<!-- Objetivo para interrupção da segmentação. -->
+		<performgoal name="stop_segmentation">
+			<creationcondition>
+				$beliefbase.stop_requested
+			</creationcondition>
+		</performgoal>
+		
+		<!-- Objetivo para encerramento da aplicação. -->
+		<performgoal name="shutdown_application">
+			<creationcondition>
+				$beliefbase.shutdown_requested
+			</creationcondition>
+		</performgoal>
+
+		<!--
+		........................................................................
+		Sub-objetivos
+		........................................................................
+		-->
+		
+		<!-- Sub-objetivo de criação de agentes na plataforma JADEX. -->
+		<achievegoalref name="ams_create_agent">
+			<concrete ref="amscap.ams_create_agent" />
+		</achievegoalref>
+
+		<!-- Sub-objetivo de encerramento da plataforma JADEX. -->
+		<achievegoalref name="ams_shutdown_platform">
+			<concrete ref="amscap.ams_shutdown_platform" />
+		</achievegoalref>
+	</goals>
+	
+	<!--
+	**********************************************************************************************
+	Planos
+	**********************************************************************************************
+	-->
+
+	<plans>
+		<!-- Plano para a criação de um decompositor para uma região do ambiente. -->
+		<plan name="create_decomposer">
+			<parameter name="$region" class="CRegion">
+				<goalmapping ref="process_region.$region"/>
+			</parameter>
+			<body class="CCreateDecomposerPlan" />
+			<trigger>
+				<goal ref="process_region" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para notificação da requisição de parada ao decompositor ativo. -->
+		<plan name="notify_stop_request">
+			<body class="CNotifyDecomposerAboutStopRequestPlan" />
+			<trigger>
+				<goal ref="stop_segmentation" />
+			</trigger>
+			<precondition>
+				$beliefbase.region_in_process != null
+			</precondition>
+		</plan>
+
+		<!-- Plano para limpeza das crenças ao encerrar. -->
+		<plan name="reset_beliefs">
+			<body class="CResetBeliefsPlan" />
+			<trigger>
+				<goal ref="stop_segmentation" />
+				<goal ref="conclude_segmentation" />
+			</trigger>
+		</plan>
+
+		<!-- Plano para a produção dos resultados da segmentação. -->
+		<plan name="produce_results">
+			<body class="CProduceResultsPlan" />
+			<trigger>
+				<goal ref="conclude_segmentation" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para tratamento da mensagem de conclusão da decomposição. -->
+		<plan name="handle_decomposition_conclusion_plan">
+			<body class="CHandleDecompositionConclusionPlan" />
+			<trigger>
+				<messageevent ref="conclusion_message" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para o encerramento da aplicação. -->
+		<plan name="shutdown_application">
+			<body class="CShutdownApplicationPlan" />
+			<trigger>
+				<goal ref="shutdown_application" />
+			</trigger>
+		</plan>
+	</plans>
+
+	<events>
+		<!-- Mensagem para informação da conclusão da decomposição, recebida pelo agente. -->
+		<messageevent name="conclusion_message" type="fipa" direction="receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CConclusionInformation.class</value>
+			</parameter>
+		</messageevent>
+		
+		<!-- Mensagem para requisição da parada da decomposição, enviada pelo agente. -->
+		<messageevent name="stop_message" type="fipa" direction="send">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.REQUEST</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CStopRequest.class</value>
+			</parameter>
+		</messageevent>
+	</events>
+
+	<!--
+	**********************************************************************************************
+	Propriedades
+	**********************************************************************************************
+	-->
+	
+	<properties>
+		<property name="logging.level">Level.OFF</property>
+		<property name="logging.useParentHandlers">true</property>
+	</properties>
+	
+	<!--
+	**********************************************************************************************
+	Configurações
+	**********************************************************************************************
+	-->
+	
+	<configurations>
+		<configuration name="default" />
+	</configurations>
+</agent>

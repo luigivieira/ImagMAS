@@ -1,0 +1,511 @@
+<!--
+/*
+ * Copyright (C) 2009 Luiz Carlos Vieira
+ * http://www.luiz.vieira.nom.br
+ *
+ * This file is part of the ImagMAS (A Multiagent System to Estimate
+ * the Coverage of Alluminum Alloy Plates Submitted to Peen Forming Process).
+ *
+ * ImagMAS is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ImagMAS is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+**********************************************************************************************
+CenterMarker.agent.xml
+Arquivo de definição JADEX para o agente com o papel de Marcador de Centro.
+	
+Autor: Luiz Carlos Vieira
+Versão: 2.0
+Data: 01 de novembro de 2008
+**********************************************************************************************
+-->
+
+<agent xmlns="http://jadex.sourceforge.net/jadex"
+			 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			 xsi:schemaLocation="http://jadex.sourceforge.net/jadex
+			 http://jadex.sourceforge.net/jadex-0.96.xsd"
+	name="CenterMarker"
+	package="imagmas.agents.ADFs">
+
+	<!--
+	**********************************************************************************************
+	Importações
+	**********************************************************************************************
+	-->
+
+	<imports>
+		<import>java.util.*</import>
+		<import>java.util.logging.*</import>
+		<import>jadex.adapter.fipa.*</import>
+		<import>jadex.planlib.*</import>
+		<import>jadex.util.*</import>
+		<import>imagmas.data.*</import>
+		<import>imagmas.plans.*</import>
+		<import>imagmas.agents.*</import>
+		<import>imagmas.agents.sensors.*</import>
+		<import>imagmas.algorithms.*</import>
+		<import>imagmas.ontology.*</import>
+		<import>imagmas.algorithms.*</import>
+	</imports>
+
+	<!--
+	**********************************************************************************************
+	Capacidades
+	**********************************************************************************************
+	-->
+
+	<capabilities>
+		<!-- Capacidade da biblioteca JADEX para a manipulação (criação/eliminação) de agentes. -->
+		<capability name="amscap" file="jadex.planlib.AMS" />
+	</capabilities>
+
+	<!--
+	**********************************************************************************************
+	Crenças
+	**********************************************************************************************
+	-->
+
+	<beliefs>
+	
+		<!-- O próprio agente. -->
+		<belief name="myself" class="CCenterMarker">
+			<fact>new CCenterMarker($agent.getAgentIdentifier(), $beliefbase.location, $beliefbase.radius)</fact>
+		</belief>
+	
+		<!-- O agente decompositor. -->
+		<belief name="decomposer" class="CRegionDecomposer" exported="true" />
+
+		<!-- Localização espacial no ambiente e centro da cratera em análise pelo agente. -->
+		<belief name="location" class="CLocation" exported="true" />
+		
+		<!-- Raio de observação do agente e raio da cratéra em análise. -->
+		<belief name="radius" class="int" exported="true" />
+		
+		<!-- Fator de inclusão entre crateras. -->
+		<belief name="inclusion_factor" class="double" exported="true" />
+		
+		<!-- Fator de diferenciação entre crateras. -->
+		<belief name="differentiation_factor" class="double" exported="true" />
+		
+		<!-- Parâmetro com uma matriz das marcas que originaram o agente.
+			 Como o JADEX não suporta a passagem aos agentes de argumentos
+			 que sejam listas de crenças (beliefset's), foi preciso passar
+			 as marcas como um array em uma única crença (belief).
+		     -->
+		<belief name="marks_param" class="CMark[]" exported="true" />
+		
+		<!-- Marcas originadoras do agente. Lista de crenças montada a partir da matriz
+		     recebida em "marks_param". -->
+		<beliefset name="source_marks" class="CMark"/>
+		
+		<!-- Localidades das marcas originadoras. -->
+		<beliefset name="marks_locations" class="CLocation">
+			<facts evaluationmode="dynamic">
+					select $mark.getLocation()
+					from CMark $mark in $beliefbase.source_marks
+			</facts>
+		</beliefset>
+
+		<!-- Localidade centróide das marcas originadoras. -->
+		<belief name="marks_centroid" class="CLocation">
+			<fact evaluationmode="dynamic">
+				CLocation.calcCentroidLocation($beliefbase.marks_locations)
+			</fact>
+		</belief>
+
+		<!-- Marcas visíveis no ambiente (segundo o raio). -->
+		<beliefset name="visible_marks" class="CMark">
+			<facts evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("mark") != null ?
+				(CMark[]) $beliefbase.myself.getSensor("mark").sense() :
+				new CMark[0]
+			</facts>
+		</beliefset>
+
+		<!-- Direção provável do centro. É a direção oposta ao centróide das marcas originadoras. -->
+		<belief name="probable_center_direction" class="EDirection">
+			<fact evaluationmode="dynamic">
+				$beliefbase.location.calcDirectionTo($beliefbase.marks_centroid).getOpposedDirection()
+			</fact>
+		</belief>
+
+		<!-- Agentes visíveis no ambiente segundo o raio atual. -->
+		<beliefset name="visible_agents" class="CCenterMarker" updaterate="1000">
+			<facts evaluationmode="dynamic">
+				$beliefbase.myself.getSensor("agent") != null ?
+				(CCenterMarker[]) $beliefbase.myself.getSensor("agent").sense() :
+				new CCenterMarker[0]
+			</facts>
+		</beliefset>
+
+		<!-- Lista de ângulos que indicam proximidade do centro provável quando um agente é
+		     observado em relação à localidade atual. -->
+		<beliefset name="closeness_indicative_angles" class="int">
+			<fact>0</fact>
+			<fact>45</fact>
+			<fact>315</fact>
+		</beliefset>
+
+		<!-- Dentre os agentes visíveis, aqueles que estão na direção do centro provável. -->
+		<beliefset name="agents_towards_probable_center" class="CCenterMarker">
+			<facts evaluationmode="dynamic">
+				select CCenterMarker $marker
+				from $beliefbase.visible_agents
+				where $beliefbase.getBeliefSet("closeness_indicative_angles").containsFact(
+						$beliefbase.probable_center_direction.calcAngularDifferenceTo(
+  					  		$beliefbase.location.calcDirectionTo($marker.getLocation())
+  					  	)
+  					  )
+			</facts>
+		</beliefset>
+
+		<!-- Dentre os agentes na direção do centro provável, aquele que é a melhor opção de
+			 representação de uma cratera (ou seja, aquele com o maior raio). -->
+		<belief name="best_option_agent" class="CCenterMarker">
+			<fact evaluationmode="dynamic">
+				select one CCenterMarker $marker
+				from $beliefbase.agents_towards_probable_center
+				order by $marker.getRadius() desc
+			</fact>
+		</belief>
+
+		<!-- Indicativo de que um agente melhor caracterizado para representar a cratera foi ou
+			 não encontrado, decorrente da comparação do raio da melhor opção observada com o
+			 próprio raio. -->
+		<belief name="better_suited_agent_found" class="boolean">
+			<fact evaluationmode="dynamic">
+				CHelpers.safeGetRadius($beliefbase.best_option_agent) &gt; $beliefbase.radius
+			</fact>
+		</belief>
+
+		<!-- Lista de agentes observados que são considerados absorvíveis segundo os fatores de 
+		     inclusão e diferenciação. -->
+		<beliefset name="absorbable_agents" class="CCenterMarker">
+			<facts evaluationmode="dynamic">
+				select CCenterMarker $marker
+				from $beliefbase.visible_agents
+				where (
+				  		$marker.getRadius() &lt; $beliefbase.radius &amp;&amp;
+				  		CGeometricAlgorithms.calcDifferenceFactor($marker.getRadius(), $beliefbase.radius) &lt;= $beliefbase.differentiation_factor &amp;&amp;
+					   (CGeometricAlgorithms.calcIntersectionArea($beliefbase.location, $beliefbase.radius, $marker.getLocation(), $marker.getRadius()) / 
+					    CGeometricAlgorithms.calcCircleArea($marker.getRadius())) &gt;= $beliefbase.inclusion_factor
+					  )
+			</facts>
+		</beliefset>
+		
+		<!-- Lista de agentes absorvíveis já informados dessa condição. -->
+		<beliefset name="absorbable_agents_informed" class="CCenterMarker" />
+		
+		<!-- Indicação de que a cratera não é válida por conclusão direta ou por informação
+			 de condição absorvível por outro agente. -->
+		<belief name="crater_is_invalid" class="boolean">
+			<fact evaluationmode="dynamic">
+				$beliefbase.better_suited_agent_found ||
+				$beliefbase.absorbable_by_other_agent
+			</fact>
+		</belief>
+		
+		<!-- Indicação de que a condição da cratera (válida ou inválida) já foi informada ao decompositor. -->
+		<belief name="crater_condition_informed" class="boolean" />
+		
+		<!-- Indicação de que o agente é absorvível por outro agente (segundo a análise deste outro). -->
+		<belief name="absorbable_by_other_agent" class="boolean" />
+
+		<!-- Indicação de que a análise foi concluida pelo agente decompositor. -->
+		<belief name="analysis_concluded" class="boolean" />
+	</beliefs>
+	
+	<!--
+	**********************************************************************************************
+	Objetivos
+	**********************************************************************************************
+	-->
+
+	<goals>
+		<!--
+		........................................................................
+		Objetivos principais
+		........................................................................
+		-->
+
+		<!-- Objetivo de informação de condição de absorvível a outros agentes.
+			 Tem uma instância ativada para cada agente obsevado nessa condição. -->
+		<performgoal name="inform_absorbable_condition">
+			<parameter name="$marker" class="CCenterMarker">
+				<bindingoptions>$beliefbase.absorbable_agents</bindingoptions>
+			</parameter>
+			<unique />
+			<creationcondition>
+				$beliefbase.getBeliefSet("absorbable_agents").size() &gt; 0 &amp;&amp;
+				!$beliefbase.getBeliefSet("absorbable_agents_informed").containsFact($marker)
+				<relevantbeliefset ref="absorbable_agents" />
+			</creationcondition>
+			<deliberation>
+				<inhibits ref="invalidate_crater"/>
+			</deliberation>
+		</performgoal>
+
+		<!-- Objetivo de invalidação da cratera, caso tenha-se chegado à essa conclusão. -->
+		<performgoal name="invalidate_crater">
+			<unique />
+			<creationcondition>
+				!$beliefbase.analysis_concluded &amp;&amp;
+				!$beliefbase.crater_condition_informed &amp;&amp;
+				$beliefbase.crater_is_invalid
+			</creationcondition>
+			<deliberation>
+				<inhibits ref="terminate"/>
+			</deliberation>
+		</performgoal>
+		
+		<!-- Objetivo de encerramento quando a análise é concluída. -->
+		<performgoal name="terminate">
+			<creationcondition>
+				$beliefbase.analysis_concluded
+			</creationcondition>
+		</performgoal>
+		
+		<!--
+		........................................................................
+		Sub-objetivos
+		........................................................................
+		-->
+		
+		<!-- Sub-objetivo de destruição de agentes na plataforma JADEX. -->
+		<achievegoalref name="ams_destroy_agent">
+			<concrete ref="amscap.ams_destroy_agent" />
+		</achievegoalref>
+	</goals>
+
+	<!--
+	**********************************************************************************************
+	Planos
+	**********************************************************************************************
+	-->
+
+	<plans>
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de informação de condição de absorvível
+		........................................................................
+		-->
+
+		<!-- Plano para informação a um agente sobre sua condição de absorvível. -->
+		<plan name="inform_absorbable_condition">
+			<parameter name="$marker" class="CCenterMarker">
+				<value>$goal.$marker</value>
+			</parameter>
+			<body class="CInformAbsorbableConditionPlan" />
+			<trigger>
+				<goal ref="inform_absorbable_condition" />
+			</trigger>
+		</plan>
+	
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de invalidação da cratera
+		........................................................................
+		-->
+
+		<!-- Plano para informação ao decompositor de que a cratera é inválida. -->
+		<plan name="inform_invalid_crater">
+			<parameter name="$crater_valid" class="boolean">
+				<value>false</value>
+			</parameter>
+			<body class="CInformCraterConditionPlan" />
+			<trigger>
+				<goal ref="invalidate_crater" />
+			</trigger>
+		</plan>
+		
+		<!--
+		........................................................................
+		Planos aplicáveis ao objetivo de encerramento
+		........................................................................
+		-->
+
+		<!-- Plano para informação ao decompositor de que a cratera é válida na conclusão da análise,
+			 caso ela não seja inválida e essa condição não foi reportada no passado. -->
+		<plan name="inform_valid_crater">
+			<parameter name="$crater_valid" class="boolean">
+				<value>true</value>
+			</parameter>
+			<body class="CInformCraterConditionPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+			<precondition>
+				!$beliefbase.crater_condition_informed &amp;&amp;
+				!$beliefbase.crater_is_invalid
+			</precondition>
+		</plan>
+		
+		<!-- Plano para encerramento do agente na conclusão da análise. -->
+		<plan name="end_myself">
+			<body class="CEndMyselfPlan" />
+			<trigger>
+				<goal ref="terminate" />
+			</trigger>
+		</plan>
+		
+		<!--
+		........................................................................
+		Planos de aplicação geral (sem dependência de objetivos)
+		........................................................................
+		-->
+	
+		<!-- Plano para reconhecimento das marcas originadoras do agente.
+		     Necessário devido à impossibilidade imposta pelo JADEX de
+		     receber argumentos contendo listas de crenças (beliefset's). -->
+		<plan name="acknowledge_source_marks">
+			<body class="CAcknowledgeSourceMarksPlan" />
+		</plan>
+	
+		<!-- Plano para registro e posicionamento inicial do agente no ambiente. -->
+		<plan name="enter_environment">
+			<body class="CEnterEnvironmentPlan" />
+		</plan>
+		
+		<!-- Plano para informação ao decompositor que a análise foi iniciada. -->
+		<plan name="inform_start_up">
+			<body class="CInformStartupPlan" />
+		</plan>
+		
+		<!-- Plano para atualização das crenças acessíveis aos demais agentes. -->
+		<plan name="update_agent_info">
+			<body class="CUpdateAgentInfoPlan" />
+			<trigger>
+				<beliefchange ref="location" />
+				<beliefchange ref="radius" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para tratamento de notificações da condição de absorvível. -->
+		<plan name="handle_absorbable_condition">
+			<body class="CHandleAbsorbableConditionPlan" />
+			<trigger>
+				<messageevent ref="absorbable_condition_message" />
+			</trigger>
+		</plan>
+		
+		<!-- Plano para tratamento de notificações da conclusão da análise. -->
+		<plan name="handle_analysis_conclusion">
+			<body class="CHandleAnalysisConclusionPlan" />
+			<trigger>
+				<messageevent ref="conclusion_message" />
+			</trigger>
+		</plan>
+	</plans>
+
+	<!--
+	**********************************************************************************************
+	Eventos
+	**********************************************************************************************
+	-->
+	
+	<events>
+		<!-- Mensagem para informação de inicio, enviada pelo agente. -->
+		<messageevent name="start_information_message" type="fipa" direction="send">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CStartInformation.class</value>
+			</parameter>
+		</messageevent>
+	
+		<!-- Mensagem para informação de condição de absorvível, recebida e enviada pelo agente. -->
+		<messageevent name="absorbable_condition_message" type="fipa" direction="send_receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CAbsorbableConditionInformation.class</value>
+			</parameter>
+		</messageevent>
+		
+		<!-- Mensagem para informação da análise da cratera, enviada pelo agente. -->
+		<messageevent name="crater_analysis_message" type="fipa" direction="send">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CCraterAnalysisInformation.class</value>
+			</parameter>
+		</messageevent>
+		
+		<!-- Mensagem para informação da conclusão da análise, recebida pelo agente. -->
+		<messageevent name="conclusion_message" type="fipa" direction="receive">
+			<parameter name="performative" class="String" direction="fixed">
+				<value>SFipa.INFORM</value>
+			</parameter>
+			<parameter name="language" class="String" direction="fixed">
+				<value>SFipa.NUGGETS_XML</value>
+			</parameter>
+			<parameter name="ontology" class="String" direction="fixed">
+				<value>COntology.IMAGMAS_ONTOLOGY_NAME</value>
+			</parameter>
+			<parameter name="content-class" class="Class" direction="fixed">
+				<value>CConclusionInformation.class</value>
+			</parameter>
+		</messageevent>
+	</events>
+
+	<!--
+	**********************************************************************************************
+	Propriedades
+	**********************************************************************************************
+	-->
+	
+	<properties>
+		<property name="logging.level">Level.OFF</property>
+		<property name="logging.useParentHandlers">true</property>
+	</properties>
+
+	<!--
+	**********************************************************************************************
+	Configurações
+	**********************************************************************************************
+	-->
+	
+	<configurations>
+		<configuration name="default">
+			<plans>
+				<!-- Ativa ao iniciar o plano de reconhecimento das marcas originadoras. -->
+				<initialplan ref="acknowledge_source_marks" />
+				<!-- Ativa ao iniciar o plano de identificação do agente no ambiente. -->
+				<initialplan ref="enter_environment" />
+				<!-- Ativa ao iniciar o plano de informação do início ao decompositor. -->
+				<initialplan ref="inform_start_up" />
+			</plans>
+		</configuration>
+	</configurations>
+</agent>

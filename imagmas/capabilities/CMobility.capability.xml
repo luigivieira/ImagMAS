@@ -1,0 +1,127 @@
+<!--
+/*
+ * Copyright (C) 2009 Luiz Carlos Vieira
+ * http://www.luiz.vieira.nom.br
+ *
+ * This file is part of the ImagMAS (A Multiagent System to Estimate
+ * the Coverage of Alluminum Alloy Plates Submitted to Peen Forming Process).
+ *
+ * ImagMAS is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * ImagMAS is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+**********************************************************************************************
+CMobility.capability.xml
+Define a capacidade de movimentação dos agentes no ambiente.
+	
+Autor: Luiz Carlos Vieira
+Versão: 1.0
+Data: 11 de março de 2008
+**********************************************************************************************
+-->
+
+<capability xmlns="http://jadex.sourceforge.net/jadex"
+			xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			xsi:schemaLocation="http://jadex.sourceforge.net/jadex
+			http://jadex.sourceforge.net/jadex-0.96.xsd"
+	name="CMobility"
+	package="imagmas.capabilities">
+
+	<!--
+	**********************************************************************************************
+	Importações
+	**********************************************************************************************
+	-->
+
+	<imports>
+		<import>java.util.logging.*</import>
+		<import>imagmas.ontology.*</import>
+		<import>imagmas.environment.*</import>
+		<import>imagmas.plans.*</import>
+	</imports>
+
+	<!--
+	**********************************************************************************************
+	Capacidades
+	**********************************************************************************************
+	-->
+
+	<capabilities />
+
+	<!--
+	**********************************************************************************************
+	Crenças
+	**********************************************************************************************
+	-->
+
+	<beliefs>
+		<!-- O próprio agente -->
+		<beliefref name="myself" class="CAgentInfo" exported="true">
+			<abstract />
+		</beliefref>
+	
+		<!-- Localização atual do agente no ambiente -->
+		<belief name="location" class="CLocation" exported="true" />
+	</beliefs>
+	
+	<!--
+	**********************************************************************************************
+	Objetivos
+	**********************************************************************************************
+	-->
+
+	<goals>
+		<!-- Objetivo de movimentação na direção informada. -->
+		<performgoal name="move_towards_direction_goal" exported="true">
+			<parameter name="direction" class="EDirection" />
+			<unique />
+		</performgoal>
+		
+		<!-- Objetivo de movimentação para a localidade informada -->
+		<performgoal name="move_to_location_goal" exported="true">
+			<parameter name="location" class="CLocation" />
+			<unique />
+		</performgoal>
+	</goals>
+
+	<!--
+	**********************************************************************************************
+	Planos
+	**********************************************************************************************
+	-->
+
+	<plans>
+		<!-- Plano para movimentação de um pixel na direção informada. -->
+		<plan name="move_towards_direction_plan">
+			<parameter name="direction" class="EDirection">
+				<goalmapping ref="move_towards_direction_goal.direction" />
+			</parameter>
+			<body class="CMoveTowardsDirectionPlan" />
+			<trigger>
+				<goal ref="move_towards_direction_goal" />
+			</trigger>
+		</plan>
+
+		<!-- Plano para movimentação para a localidade informada. -->
+		<plan name="move_to_location_plan">
+			<parameter name="location" class="CLocation">
+				<goalmapping ref="move_to_location_goal.location" />
+			</parameter>
+			<body class="CMoveToLocationPlan" />
+			<trigger>
+				<goal ref="move_to_location_goal" />
+			</trigger>
+		</plan>
+	</plans>
+
+</capability>
